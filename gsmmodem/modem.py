@@ -194,7 +194,7 @@ class GsmModem(SerialComms):
         :raise PinRequiredError: if the SIM card requires a PIN but none was provided
         :raise IncorrectPinError: if the specified PIN is incorrect
         """
-        self.log.info('Connecting to modem on port %s at %dbps', self.port, self.baudrate)
+        self.log.info('[FIXME] Connecting to modem on port %s at %dbps', self.port, self.baudrate)
         super(GsmModem, self).connect()
 
         if waitingForModemToStartInSeconds > 0:
@@ -272,9 +272,11 @@ class GsmModem(SerialComms):
         # Attempt to identify modem type directly (if not already) - for outgoing call status updates
         if callUpdateTableHint == 0:
             if 'simcom' in self.manufacturer.lower() : #simcom modems support DTMF and don't support AT+CLAC
-                Call.dtmfSupport = True
-                self.write('AT+DDET=1')                # enable detect incoming DTMF
-
+                try:
+                    self.write('AT+DDET=1')                # enable detect incoming DTMF
+                    Call.dtmfSupport = True
+                except CommandError:
+                    pass 
             if self.manufacturer.lower() == 'huawei':
                 callUpdateTableHint = 1 # huawei
             else:
@@ -921,7 +923,9 @@ class GsmModem(SerialComms):
             # Send SMS PDUs via AT commands
             for pdu in pdus:
                 self.write('AT+CMGS={0}'.format(pdu.tpduLength), timeout=5, expectedResponseTermSeq='> ')
-                result = lineStartingWith('+CMGS:', self.write(str(pdu), timeout=35, writeTerm=CTRLZ)) # example: +CMGS: xx
+                #result = lineStartingWith('+CMGS:', self.write(str(pdu), timeout=35, writeTerm=CTRLZ)) # example: +CMGS: xx
+                self.log.debug('Change timeout from 35 to 65')
+                result = lineStartingWith('+CMGS:', self.write(str(pdu), timeout=65, writeTerm=CTRLZ)) # [FIXME] change timeout
 
         if result == None:
             raise CommandError('Modem did not respond with +CMGS response')
@@ -1349,6 +1353,7 @@ class GsmModem(SerialComms):
             if cmtiMatch:
                 msgMemory = cmtiMatch.group(1)
                 msgIndex = cmtiMatch.group(2)
+                self.log.debug('[FIXME] SMS message received index={0}, memory={1}'.format(msgIndex, msgMemory))
                 sms = self.readStoredSms(msgIndex, msgMemory)
                 try:
                     self.smsReceivedCallback(sms)
@@ -1364,20 +1369,25 @@ class GsmModem(SerialComms):
         if cdsiMatch:
             msgMemory = cdsiMatch.group(1)
             msgIndex = cdsiMatch.group(2)
+            self.log.debug('[FIXME] SMS status report received index={0}, memory={1} -- SKIP read/delete'.format(msgIndex, msgMemory))
+            """
             report = self.readStoredSms(msgIndex, msgMemory)
             self.deleteStoredSms(msgIndex)
             # Update sent SMS status if possible
             if report.reference in self.sentSms:
                 self.sentSms[report.reference].report = report
+            """
             if self._smsStatusReportEvent:
                 # A sendSms() call is waiting for this response - notify waiting thread
                 self._smsStatusReportEvent.set()
+            """
             elif self.smsStatusReportCallback:
                 # Nothing is waiting for this report directly - use callback
                 try:
                     self.smsStatusReportCallback(report)
                 except Exception:
                     self.log.error('error in smsStatusReportCallback', exc_info=True)
+            """
 
     def _handleSmsStatusReportTe(self, length, notificationLine):
         """ Handler for TE SMS status reports """
